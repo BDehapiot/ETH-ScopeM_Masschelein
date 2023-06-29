@@ -5,8 +5,13 @@ import napari
 import numpy as np
 from pathlib import Path
 from magicgui import magicgui
+import matplotlib.pyplot as plt
 from pylibCZIrw import czi as pyczi
-from czitools import extract_metadata
+from scipy.ndimage import distance_transform_edt
+from sklearn.preprocessing import minmax_scale
+
+import tensorflow as tf
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 
 #%% Comments ------------------------------------------------------------------
 
@@ -21,8 +26,9 @@ patchStep = 10
 
 #%% Initialize ----------------------------------------------------------------
 
-data_path = Path('D:\local_Masschelein\data')
-model_path = Path('D:\local_Masschelein\data\model')
+data_path = Path('D:/local_Masschelein/data')
+model_path = Path('D:/local_Masschelein/data/model')
+csv_path = Path('D:/local_Masschelein/data/model/roiCoords.csv')
 
 # Get paths & open images
 img_data = []
@@ -34,6 +40,12 @@ for czi_path in data_path.iterdir():
                 czidoc.read(plane={'T': 0, 'Z': 0, 'C': 0}).squeeze(),
                 czidoc.read(plane={'T': 0, 'Z': 0, 'C': 1}).squeeze(),
                 ))
+            
+# Open csv file
+if not selectROIs:
+    with open(str(csv_path), 'r') as f:
+        reader = csv.reader(f)
+        roiCoords = [tuple(map(int, row)) for row in reader]
             
 #%% Select ROIs ---------------------------------------------------------------
 
@@ -106,64 +118,153 @@ if selectROIs:
         coords = points[i]
         for coord in coords:
             roiCoords.append(tuple((i, coord[0], coord[1])))
-    with open(str(model_path) + '/roiCoords.csv', 'w', newline='') as file:
+    with open(csv_path, 'w', newline='') as file:
         writer = csv.writer(file)
         writer.writerows(roiCoords)
         
-#%%
+#%% Make patches --------------------------------------------------------------
 
-#%% Extract ROIs --------------------------------------------------------------
-
-# patch_data = []
-# for czi_path in czi_paths:
+patch_data = []
+for i, data in enumerate(img_data):
     
-#     # Extract metadata
-#     metadata = extract_metadata(str(czi_path))
+    # Extract variables
+    C1, C2 = minmax_scale(data[1]), minmax_scale(data[2])
+    nY, nX = C1.shape[0], C1.shape[1]
     
-#     # Define patch coordinates
-#     nX, nY = metadata['nX'], metadata['nY']
-#     xRange = np.arange(0, nX - patchSize, patchStep)
-#     yRange = np.arange(0, nY - patchSize, patchStep)  
-#     coords = np.column_stack((
-#         np.repeat(xRange, len(yRange)),
-#         np.tile(yRange, len(xRange)),
-#         ))
+    # Extract roiCoords and make EDM
+    coords = np.array([coord[1:] for coord in roiCoords if coord[0] == i])
+    EDM = np.zeros_like(C1, dtype=bool)
+    EDM[coords[:,0], coords[:,1]] = True
+    EDM = distance_transform_edt(np.invert(EDM))
     
-#     # Open images
-#     with pyczi.open_czi(str(czi_path)) as czidoc:
-#         C1 = czidoc.read(plane={'T': 0, 'Z': 0, 'C': 0}).squeeze()
-#         C2 = czidoc.read(plane={'T': 0, 'Z': 0, 'C': 1}).squeeze()
-        
-#     # Create patches
-#     for coord in coords:
-#         x0, y0 = coord[0], coord[1]
-#         xMid, yMid = x0 + patchSize // 2, y0 + patchSize // 2, 
-#         patch_data.append((
-#             czi_path.name, xMid, yMid,
-#             C1[y0:y0 + patchSize, x0:x0 + patchSize],
-#             C2[y0:y0 + patchSize, x0:x0 + patchSize],
-#             ))
-        
-#%%
+    # Define patch coordinates
+    xRange = np.arange(0, nX - patchSize, patchStep)
+    yRange = np.arange(0, nY - patchSize, patchStep)  
+    patchCoords = np.column_stack((
+        np.repeat(xRange, len(yRange)),
+        np.tile(yRange, len(xRange)),
+        ))
 
-# name = '4.1.czi'
-# x = 550
-# y = 377
+    # Create patches
+    for patchCoord in patchCoords:
+        x0, y0 = patchCoord[0], patchCoord[1]
+        xCtr, yCtr = x0 + patchSize // 2, y0 + patchSize // 2, 
+        patch_data.append((
+            czi_path.name, xCtr, yCtr, EDM[yCtr, xCtr],
+            C1[y0:y0 + patchSize, x0:x0 + patchSize],
+            C2[y0:y0 + patchSize, x0:x0 + patchSize],
+            ))
 
-# names = np.array([data[0] for data in patch_data])
-# xMid = np.array([data[1] for data in patch_data])
-# yMid = np.array([data[2] for data in patch_data])
-# coords = np.array(list(zip(xMid, yMid)))
-# dist = np.sum((coords - (x, y)) ** 2, axis=1)
-# mask = (names == name)
-# idxs = np.where(mask)[0]
-# idx = idxs[np.argmin(dist[mask])]
+#%% Train ---------------------------------------------------------------------
 
-# img = patch_data[idx][3]
+import random
+from keras.preprocessing.image import ImageDataGenerator
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, BatchNormalization
+from keras.layers import Activation, Dropout, Flatten, Dense
+from sklearn.model_selection import train_test_split
 
-# import napari
+maxDist = 20
+subSize = 100000
+random.seed(0)
+
+# Extract & format data for training
+patches = [data[4] for data in patch_data]
+classes = np.array([data[3] for data in patch_data])
+classes = (classes < maxDist).astype(int)
+subIdx = random.sample(range(len(patches)), subSize)
+patches_train = np.stack([patches[i] for i in subIdx])
+classes_train = np.stack([classes[i] for i in subIdx])
+X_train, X_test, y_train, y_test = train_test_split(
+    patches_train, 
+    classes_train, 
+    test_size = 0.20, 
+    random_state = 0
+    )
+
+# Define & compile neural network
+input_shape = (patchSize, patchSize, 1)
+
+model = Sequential()
+model.add(Conv2D(32, (3, 3), input_shape=input_shape))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+# ---
+model.add(Conv2D(32, (3, 3), kernel_initializer = 'he_uniform'))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+# ---
+model.add(Conv2D(64, (3, 3), kernel_initializer = 'he_uniform'))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+# ---
+model.add(Flatten())
+model.add(Dense(64))
+model.add(Activation('relu'))
+model.add(Dropout(0.5))
+# ---
+model.add(Dense(1))
+model.add(Activation('sigmoid'))
+
+model.compile(
+    loss='binary_crossentropy',
+    optimizer='rmsprop',
+    metrics=['accuracy']
+    )
+
+# Train network
+history = model.fit(
+    X_train, y_train, 
+    batch_size = 64, 
+    verbose = 1, 
+    epochs = 10,      
+    validation_data=(X_test,y_test),
+    shuffle = False
+    )
+
+# Save model
+model.save(Path(model_path, 'model.h5')) 
+
+# Plot results
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+epochs = range(1, len(loss) + 1)
+plt.plot(epochs, loss, 'y', label='Training loss')
+plt.plot(epochs, val_loss, 'r', label='Validation loss')
+plt.title('Training and validation loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+acc = history.history['acc']
+val_acc = history.history['val_acc']
+plt.plot(epochs, acc, 'y', label='Training acc')
+plt.plot(epochs, val_acc, 'r', label='Validation acc')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+
+#%% Predict -------------------------------------------------------------------
+
+random.seed(1)
+subSize = 10000
+subIdx = random.sample(range(len(patches)), subSize)
+patches_predict = np.stack([patches[i] for i in subIdx])
+classes_predict = model.predict(patches_predict)
+
+validC1 = np.array([data for i, data in enumerate(patches_predict) if classes_predict[i] > 0.0005])
+viewer = napari.Viewer()
+viewer.add_image(validC1)
+
+#%% Check valid patches -------------------------------------------------------
+
+# maxDist = 20
+# validC1 = np.stack([data[4] for data in patch_data if data[3] < maxDist])
 # viewer = napari.Viewer()
-# viewer.add_image(img)
+# viewer.add_image(validC1)
    
 #%% Save data -----------------------------------------------------------------
     
