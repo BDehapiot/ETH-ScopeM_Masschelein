@@ -164,23 +164,48 @@ from keras.layers import Conv2D, MaxPooling2D, BatchNormalization
 from keras.layers import Activation, Dropout, Flatten, Dense
 from sklearn.model_selection import train_test_split
 
-maxDist = 20
-subSize = 100000
-random.seed(0)
+# -----------------------------------------------------------------------------
 
-# Extract & format data for training
-patches = [data[4] for data in patch_data]
-classes = np.array([data[3] for data in patch_data])
-classes = (classes < maxDist).astype(int)
-subIdx = random.sample(range(len(patches)), subSize)
-patches_train = np.stack([patches[i] for i in subIdx])
-classes_train = np.stack([classes[i] for i in subIdx])
-X_train, X_test, y_train, y_test = train_test_split(
-    patches_train, 
-    classes_train, 
-    test_size = 0.20, 
-    random_state = 0
-    )
+maxDist = 20
+batch_size = 128
+subSize = 50000
+
+# -----------------------------------------------------------------------------
+
+# Extract patches & labels
+subIdx = random.sample(range(len(patch_data)), subSize)
+subPatch_data = [patch_data[i] for i in subIdx]   
+patches = [np.expand_dims(data[4], axis=-1) for data in subPatch_data]
+labels = [data[3] for data in subPatch_data]
+labels = (np.array(labels) < maxDist).astype(int)
+
+# Shuffle patches & labels
+patch_label_pairs = list(zip(patches, labels))
+random.shuffle(patch_label_pairs)
+patches, labels = zip(*patch_label_pairs)
+
+# Split dataset (train & val)
+patches_train, patches_val, labels_train, labels_val = train_test_split(
+    patches, labels, test_size=0.2)
+
+# Create generators
+def generator(patches, labels=None, batch_size=batch_size):    
+    if labels is not None:
+        patches = list(zip(patches, labels))
+    while True:
+        for i in range(0, len(patches), batch_size):
+            if labels is None:
+                patches_batch = np.array(patches[i: i+batch_size])
+                yield patches_batch
+            else:
+                batch = np.array(patches[i: i+batch_size])
+                patches_batch, labels_batch = zip(*batch)
+                patches_batch = np.array(patches_batch)
+                labels_batch = np.array(labels_batch)
+                yield patches_batch, labels_batch
+            
+gen_train = generator(patches_train, labels=labels_train, batch_size=batch_size)
+gen_val = generator(patches_val, labels=labels_val, batch_size=batch_size)
 
 # Define & compile neural network
 input_shape = (patchSize, patchSize, 1)
@@ -212,20 +237,15 @@ model.compile(
     metrics=['accuracy']
     )
 
-# Train network
+# Train neural network
+steps_per_epoch = len(patches_train) // batch_size 
+validation_steps = len(patches_val) // batch_size
 history = model.fit(
-    X_train, y_train, 
-    batch_size = 64, 
-    verbose = 1, 
-    epochs = 10,      
-    validation_data=(X_test,y_test),
-    shuffle = False
+    gen_train, steps_per_epoch=steps_per_epoch, epochs=10, batch_size=batch_size, 
+    validation_data=gen_val, validation_steps=validation_steps
     )
 
-# Save model
-model.save(Path(model_path, 'model.h5')) 
-
-# Plot results
+# Plot reults
 loss = history.history['loss']
 val_loss = history.history['val_loss']
 epochs = range(1, len(loss) + 1)
@@ -237,34 +257,72 @@ plt.ylabel('Loss')
 plt.legend()
 plt.show()
 
-acc = history.history['acc']
-val_acc = history.history['val_acc']
-plt.plot(epochs, acc, 'y', label='Training acc')
-plt.plot(epochs, val_acc, 'r', label='Validation acc')
-plt.title('Training and validation accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.legend()
-plt.show()
+#%% Predict -------------------------------------------------------------------
+
+# Extract patches & labels
+subIdx = random.sample(range(len(patch_data)), subSize)
+subPatch_data = [patch_data[i] for i in subIdx]   
+patches = [np.expand_dims(data[4], axis=-1) for data in subPatch_data]
+gen_predict = generator(patches, labels=None, batch_size=batch_size)
+
+# Predict
+steps = len(patches) // batch_size + (len(patches) % batch_size != 0)
+prob = model.predict(gen_predict, steps=steps)
+validPatches = np.array([data for i, data in enumerate(patches) if prob[i] > 0.05]).squeeze()
+viewer = napari.Viewer()
+viewer.add_image(validPatches)
 
 #%% Predict -------------------------------------------------------------------
 
-random.seed(1)
-subSize = 10000
-subIdx = random.sample(range(len(patches)), subSize)
-patches_predict = np.stack([patches[i] for i in subIdx])
-classes_predict = model.predict(patches_predict)
+# Extract variables
+imNumb = 0
+C1, C2 = minmax_scale(img_data[imNumb][1]), minmax_scale(img_data[imNumb][2])
+nY, nX = C1.shape[0], C1.shape[1]
 
-validC1 = np.array([data for i, data in enumerate(patches_predict) if classes_predict[i] > 0.0005])
+# Define patch coordinates
+xRange = np.arange(0, nX - patchSize, patchStep)
+yRange = np.arange(0, nY - patchSize, patchStep)  
+patchCoords = np.column_stack((
+    np.repeat(xRange, len(yRange)),
+    np.tile(yRange, len(xRange)),
+    ))
+
+# Create patches
+for patchCoord in patchCoords:
+    x0, y0 = patchCoord[0], patchCoord[1]
+    xCtr, yCtr = x0 + patchSize // 2, y0 + patchSize // 2, 
+    patch_data.append((
+        czi_path.name, xCtr, yCtr, EDM[yCtr, xCtr],
+        C1[y0:y0 + patchSize, x0:x0 + patchSize],
+        C2[y0:y0 + patchSize, x0:x0 + patchSize],
+        ))
+    
+# 
+patches = [np.expand_dims(data[4], axis=-1) for data in patch_data]
+gen_predict = generator(patches, labels=None, batch_size=batch_size)
+    
+# Predict
+steps = len(patches) // batch_size + (len(patches) % batch_size != 0)
+prob = model.predict(gen_predict, steps=steps)
+
+#%%
+
+from scipy.interpolate import griddata
+
+prob_map = np.zeros_like(C1) * np.nan
+xCtr = [data[1] for data in patch_data]
+yCtr = [data[2] for data in patch_data]
+
+for i, (x, y) in enumerate(zip(xCtr, yCtr)):
+    prob_map[y, x] = prob[i]
+y, x = np.mgrid[0:prob_map.shape[0], 0:prob_map.shape[1]]
+mask = ~np.isnan(prob_map)
+prob_map = griddata((y[mask], x[mask]), prob_map[mask], (y, x), method='cubic')
+    
 viewer = napari.Viewer()
-viewer.add_image(validC1)
+viewer.add_image(prob_map)
+viewer.add_image(C1)
 
-#%% Check valid patches -------------------------------------------------------
-
-# maxDist = 20
-# validC1 = np.stack([data[4] for data in patch_data if data[3] < maxDist])
-# viewer = napari.Viewer()
-# viewer.add_image(validC1)
-   
+ 
 #%% Save data -----------------------------------------------------------------
     
