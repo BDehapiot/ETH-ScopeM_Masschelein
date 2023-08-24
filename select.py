@@ -68,7 +68,19 @@ def next_image():
         point_layer.data = []
         viewer.dims.set_point(0, current_index + 1)
     else:
+        viewer.window._qt_window.close()
         print('End of image stack.')
+        
+def save_csv_on_close(event):
+    valid_coords = []
+    for i in points:
+        coords = points[i]
+        for coord in coords:
+            valid_coords.append(tuple((czi_paths[i].name, coord[0], coord[1])))
+    with open(csv_path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerows(valid_coords)
+    print('CSV file saved on window close.')
         
 # Shortcuts
 @napari.Viewer.bind_key('Enter', overwrite=True)
@@ -85,16 +97,7 @@ def switch_channel(viewer):
     
 # Setup and update viewer
 viewer.window.add_dock_widget(magicgui(next_image, call_button='Next Image (Enter)'))
+viewer.window._qt_window.closeEvent = save_csv_on_close
 viewer.mouse_drag_callbacks.append(mark_points)
 point_layer.mode = 'add'
 napari.run()
-
-# Format and save ROI coordinates as csv
-valid_coords = []
-for i in range(len(points)):
-    coords = points[i]
-    for coord in coords:
-        valid_coords.append(tuple((czi_paths[i].name, coord[0], coord[1])))
-with open(csv_path, 'w', newline='') as file:
-    writer = csv.writer(file)
-    writer.writerows(valid_coords)
