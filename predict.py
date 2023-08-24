@@ -14,13 +14,13 @@ from utils import ImageData, get_patch, get_generator
 
 #%% Parameters ----------------------------------------------------------------
 
-image_number = 0
+image_number = 2
 
-patchSize = 160
+patchSize = 80
 patchStep = 10
 patchFreq = 1
 rSeed = 0
-batchSize = 64
+batchSize = 128
 
 #%% Initialize ----------------------------------------------------------------
 
@@ -63,21 +63,33 @@ for i, (x, y) in enumerate(zip(xCtr, yCtr)):
 y, x = np.mgrid[0:pMap.shape[0], 0:pMap.shape[1]]
 mask = ~np.isnan(pMap)
 pMap = griddata((y[mask], x[mask]), pMap[mask], (y, x), method='cubic')
+   
+#%% Extract -------------------------------------------------------------------
 
-# #
-# coords = peak_local_max(
-#     pMap, min_distance=patchSize, threshold_abs=0.2
-#     ).astype(int)
-    
+# Detect local prediction maxima
+coords = peak_local_max(
+    pMap, min_distance=patchSize, threshold_abs=0.1
+    ).astype(int)
+
+crops = []
+for y, x in zip(coords[:,0], coords[:,1]):
+    crops.append(my_image.image[y-80:y+80,x-80:x+80])
+
+#%%
+
 # Display
 viewer = napari.Viewer()
 viewer.add_image(my_image.image)
-viewer.add_image(pMap)
-# points_layer = viewer.add_points(
-#     coords, 
-#     size=patchSize,
-#     edge_width=0.1,
-#     edge_color='red',
-#     face_color='transparent',
-#     opacity = 0.5,
-#     )
+viewer.add_image(pMap, colormap='turbo')
+points_layer = viewer.add_points(
+    coords, 
+    size=patchSize,
+    edge_width=0.1,
+    edge_color='red',
+    face_color='transparent',
+    opacity = 0.5,
+    )
+
+# Display
+viewer = napari.Viewer()
+viewer.add_image(np.stack(crops))

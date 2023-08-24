@@ -18,7 +18,7 @@ from utils import ImageData, get_patch, get_generator
 
 #%% Parameters ----------------------------------------------------------------
 
-patchSize = 160
+patchSize = 80
 patchStep = 10
 patchFreq = 0.1
 rSeed = 0
