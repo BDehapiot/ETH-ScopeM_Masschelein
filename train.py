@@ -8,13 +8,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from sklearn.model_selection import train_test_split
-
 from keras.models import Sequential
 from keras.layers import (
     Conv2D, MaxPooling2D, Activation, Dropout, Flatten, Dense
     )
-
-from utils import ImageData, get_patch, get_generator
+from functions import ImageData, get_patch, get_generator
 
 #%% Parameters ----------------------------------------------------------------
 

@@ -1,5 +1,3 @@
-#%% Info ----------------------------------------------------------------------
-
 #%% Imports -------------------------------------------------------------------
 
 import napari
@@ -7,10 +5,8 @@ import numpy as np
 from pathlib import Path
 from scipy.interpolate import griddata
 from skimage.feature import peak_local_max
-
 from keras.models import load_model
-
-from utils import ImageData, get_patch, get_generator
+from functions import ImageData, get_patch, get_generator
 
 #%% Parameters ----------------------------------------------------------------
 
