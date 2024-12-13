@@ -27,6 +27,11 @@ from functions import open_czi
 # Paths
 data_path = Path('D:/local_Masschelein/data')
 
+# Parameters
+subfolders = False
+C1_contrast_limits = [0, 7000]
+C2_contrast_limits = [0, 5000]
+
 #%% Class : Select() ----------------------------------------------------------
 
 class Select:
@@ -88,11 +93,15 @@ class Select:
         
         # Setup viewer
         self.viewer = napari.Viewer()
-        self.viewer.add_image(self.C2s[self.idx], name="C2", colormap="magenta")
-        self.viewer.add_image(self.C1s[self.idx], name="C1", colormap="green")
+        self.viewer.add_image(
+            self.C2s[self.idx], name="C2", 
+            contrast_limits=C2_contrast_limits, colormap="magenta")
+        self.viewer.add_image(
+            self.C1s[self.idx], name="C1", 
+            contrast_limits=C1_contrast_limits, colormap="green")
         self.viewer.add_points(
-            name='coords', size=120, border_width=0.05,
-            face_color=[0]*4, border_color="grey",
+            name="coords", size=120, border_width=0.05,
+            face_color=[0] * 4, border_color="grey",
             )
         self.viewer.layers["coords"].data = self.coords[self.idx] 
         self.viewer.layers["coords"].mode = "add"
@@ -157,6 +166,13 @@ class Select:
             yield
             self.viewer.layers["coords"].mode = "add"
             
+        @Points.bind_key("delete", overwrite=True)
+        def clear_coord_key(viewer):
+            self.viewer.layers["coords"].mode = "select"   
+            yield
+            self.viewer.layers["coords"].remove_selected() 
+            self.viewer.layers["coords"].mode = "add"
+            
         @Points.bind_key("Backspace", overwrite=True)
         def clear_image_coords_key(viewer):
             self.clear_image_coords()
@@ -182,7 +198,7 @@ class Select:
             self.save_coords()
             self.idx += 1
             self.display_images()
-                        
+                                    
     def clear_image_coords(self):
         self.coords[self.idx] = np.empty((0, 2))
         self.save_coords()
@@ -245,6 +261,9 @@ class Select:
             f"<span{style2}>- Pan img           {spacer * 10}:</span>"
             f"<span{style3}> Space or Num[0]</span><br>" 
             
+            f"<span{style2}>- Clear coord       {spacer * 6}:</span>"
+            f"<span{style3}> Delete + click</span><br>"  
+            
             f"<span{style2}>- Clear img. coords {spacer * 0}:</span>"
             f"<span{style3}> Backspace</span><br>"  
             
@@ -256,4 +275,4 @@ class Select:
 #%% Execute -------------------------------------------------------------------
 
 if __name__ == "__main__":
-    select = Select(data_path, subfolders=False)
+    select = Select(data_path, subfolders=subfolders)

@@ -3,6 +3,7 @@
 import re
 import time
 import numpy as np
+import pandas as pd
 from skimage import io
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -17,12 +18,10 @@ from scipy.ndimage import distance_transform_edt
 #%% Inputs --------------------------------------------------------------------
 
 # Paths
-data_path = Path('D:/local_Masschelein/data')
+data_path = Path('D:/local_Masschelein/data/0-archive')
 
 # Parameters
 crop_size = 120
-
-# Patient id
 ctr = [1, 3, 4, 5, 6, 7, 9, 11]
 pad = [2, 8, 10, 12, 13, 14, 17, 18, 19]
 
@@ -131,34 +130,43 @@ def save(data, data_path, tag="C1"):
 
     global radInts, radInts_max, radInts_max_cond1, radInts_max_cond2, tmp_nan
 
-    # Image
+    # (.tif) Image 
     io.imsave(
         Path(data_path, f"{tag}_crops_cond1_avg.tif"),
         data["crops_cond1_avg"].astype("float32"), check_contrast=False,
         )
+    io.imsave(
+        Path(data_path, f"{tag}_crops_cond2_avg.tif"),
+        data["crops_cond2_avg"].astype("float32"), check_contrast=False,
+        )
     
-    # CSV
-    
+    # (.csv) radInts 
     radInts = np.vstack((
         data["radInts_cond1_avg"], data["radInts_cond1_std"],
         data["radInts_cond2_avg"], data["radInts_cond2_std"],
         )).T
+    radInts = pd.DataFrame(radInts, columns=[
+        "avg. cond1", "std. cond1", "avg. cond2", "std. cond2"])
+    radInts.to_csv(
+        Path(data_path, f"{tag}_radInts.csv"), 
+        index=False, float_format="%.3f"
+        )
     
+    # (.csv) radInts_max 
     radInts_max_cond1 = np.stack(data["radInts_max_cond1"]).astype(float)
     radInts_max_cond2 = np.stack(data["radInts_max_cond2"]).astype(float)
     max_len = np.maximum(len(radInts_max_cond1), len(radInts_max_cond2))
-    radInts_max_cond1 = np.pad(
-        radInts_max_cond1, 
-        (0, max_len - len(radInts_max_cond1)), 
-        constant_values=np.nan
+    radInts_max = np.full((max_len, 4), np.nan)
+    radInts_max[:len(radInts_max_cond1), 0] = radInts_max_cond1
+    radInts_max[:len(radInts_max_cond2), 1] = radInts_max_cond2
+    radInts_max[0, 2] = data["radInts_max_t_stat"]
+    radInts_max[0, 3] = data["radInts_max_p_value"]
+    radInts_max = pd.DataFrame(radInts_max, columns=[
+        "cond1", "cond2", "t_stat", "p_value"])
+    radInts_max.to_csv(
+        Path(data_path, f"{tag}_radInts_max.csv"), 
+        index=False, float_format="%.5f"
         )
-    radInts_max_cond2 = np.pad(
-        radInts_max_cond2, 
-        (0, max_len - len(radInts_max_cond2)), 
-        constant_values=np.nan
-        )
-    pass
-
 
 #%% Execute -------------------------------------------------------------------
 
@@ -180,131 +188,133 @@ if __name__ == "__main__":
     
     # Save
     save(C1_data, data_path, tag="C1")
+    save(C2_data, data_path, tag="C2")
     
     t1 = time.time()
     print(f"runtime = {t1 - t0:.5f}")
     
-#%% Plot
+#%% Plot ----------------------------------------------------------------------
 
-fig = plt.figure(figsize=(8, 8))
-
-gs = fig.add_gridspec(4, 3)
-ax1 = fig.add_subplot(gs[:2, 0])
-ax2 = fig.add_subplot(gs[:2, 1])
-ax3 = fig.add_subplot(gs[0, 2])
-ax4 = fig.add_subplot(gs[1, 2])
-ax5 = fig.add_subplot(gs[2:, 0])
-ax6 = fig.add_subplot(gs[2:, 1])
-ax7 = fig.add_subplot(gs[2, 2])
-ax8 = fig.add_subplot(gs[3, 2])
-
-# -----------------------------------------------------------------------------
-
-# Plot options
-C1_color_cond1 = "green"
-C1_color_cond2 = "lightgreen"
-C2_color_cond1 = "darkmagenta"
-C2_color_cond2 = "magenta"
-
-# Extract data
-C1_radInts_max_t_stat = C1_data["radInts_max_t_stat"]
-C1_radInts_max_p_value = C1_data["radInts_max_p_value"]
-C2_radInts_max_t_stat = C2_data["radInts_max_t_stat"]
-C2_radInts_max_p_value = C2_data["radInts_max_p_value"]
-
-# -----------------------------------------------------------------------------
-
-# Plot 1
-ax1.set_title("C1 norm. fluo. int.")
-y_cond1 = C1_data["radInts_cond1_avg"]
-err_cond1 = C1_data["radInts_cond1_std"]
-x_cond1 = np.arange(len(y_cond1))
-y_cond2 = C1_data["radInts_cond2_avg"]
-err_cond2 = C1_data["radInts_cond2_std"]
-x_cond2 = np.arange(len(y_cond2))
-ax1.plot(x_cond1, y_cond1, color=C1_color_cond1, label="control")
-ax1.plot(x_cond2, y_cond2, color=C1_color_cond2, label="PAD")
-ax1.fill_between(
-    x_cond1, y_cond1 - err_cond1, y_cond1 + err_cond1,
-    alpha=0.05, color=C1_color_cond1)
-ax1.fill_between(
-    x_cond2, y_cond2 - err_cond2, y_cond2 + err_cond2,
-    alpha=0.05, color=C1_color_cond2)
-ax1.set_xlim(0, 50)
-ax1.set_ylabel("norm. fluo. int.")
-ax1.set_xlabel("Distance (pixels)")
-ax1.legend(loc="lower left")
-
-# Plot 2
-ax2.set_title(
-    f"C1 dist. of max. fluo. int.\n"
-    f"p value = {C1_radInts_max_p_value:.2e}"
-    )
-ax2.boxplot(C1_data["radInts_max_cond1"], positions=[1], 
-    widths=0.6, showfliers=False)
-ax2.boxplot(C1_data["radInts_max_cond2"], positions=[2], 
-    widths=0.6, showfliers=False)
-ax2.set_xticks([1, 2], ["control", "PAD"])
-ax2.set_ylabel("Distance (pixels)")
-
-# Plot 3
-ax3.set_title("Control avg. img.")
-ax3.imshow(C1_data["crops_cond1_avg"], cmap="Greens")
-ax3.set_ylabel("y")
-ax3.set_xlabel("x")
-
-# Plot 4
-ax4.set_title("PAD avg. img.")
-ax4.imshow(C1_data["crops_cond2_avg"], cmap="Greens")
-ax4.set_ylabel("y")
-ax4.set_xlabel("x")
-
-# -----------------------------------------------------------------------------
-
-# Plot 5
-ax5.set_title("C2 norm. fluo. int.")
-y_cond1 = C2_data["radInts_cond1_avg"]
-err_cond1 = C2_data["radInts_cond1_std"]
-x_cond1 = np.arange(len(y_cond1))
-y_cond2 = C2_data["radInts_cond2_avg"]
-err_cond2 = C2_data["radInts_cond2_std"]
-x_cond2 = np.arange(len(y_cond2))
-ax5.plot(x_cond1, y_cond1, color=C2_color_cond1, label="control")
-ax5.plot(x_cond2, y_cond2, color=C2_color_cond2, label="PAD")
-ax5.fill_between(
-    x_cond1, y_cond1 - err_cond1, y_cond1 + err_cond1,
-    alpha=0.05, color=C2_color_cond1)
-ax5.fill_between(
-    x_cond2, y_cond2 - err_cond2, y_cond2 + err_cond2,
-    alpha=0.05, color=C2_color_cond2)
-ax5.set_xlim(0, 50)
-ax5.set_ylabel("Norm. radial fluo. int.")
-ax5.set_xlabel("Distance (pixels)")
-ax5.legend(loc="lower left")
-
-# Plot 6
-ax6.set_title(
-    f"C2 dist. of max. fluo. int.\n"
-    f"p value = {C2_radInts_max_p_value:.2e}"
-    )
-ax6.boxplot(C2_data["radInts_max_cond1"], positions=[1], 
-    widths=0.6, showfliers=False)
-ax6.boxplot(C2_data["radInts_max_cond2"], positions=[2], 
-    widths=0.6, showfliers=False)
-ax6.set_xticks([1, 2], ["control", "PAD"])
-ax6.set_ylabel("Distance (pixels)")
-
-# Plot 7
-ax7.set_title("Control avg. img.")
-ax7.imshow(C2_data["crops_cond1_avg"], cmap="Purples")
-ax7.set_ylabel("y")
-ax7.set_xlabel("x")
-
-# Plot 8
-ax8.set_title("PAD avg. img.")
-ax8.imshow(C2_data["crops_cond2_avg"], cmap="Purples")
-ax8.set_ylabel("y")
-ax8.set_xlabel("x")
-
-plt.tight_layout()
-plt.show()
+    fig = plt.figure(figsize=(8, 8))
+    
+    gs = fig.add_gridspec(4, 3)
+    ax1 = fig.add_subplot(gs[:2, 0])
+    ax2 = fig.add_subplot(gs[:2, 1])
+    ax3 = fig.add_subplot(gs[0, 2])
+    ax4 = fig.add_subplot(gs[1, 2])
+    ax5 = fig.add_subplot(gs[2:, 0])
+    ax6 = fig.add_subplot(gs[2:, 1])
+    ax7 = fig.add_subplot(gs[2, 2])
+    ax8 = fig.add_subplot(gs[3, 2])
+    
+    # -------------------------------------------------------------------------
+    
+    # Plot options
+    C1_color_cond1 = "green"
+    C1_color_cond2 = "lightgreen"
+    C2_color_cond1 = "darkmagenta"
+    C2_color_cond2 = "magenta"
+    
+    # Extract data
+    C1_radInts_max_t_stat = C1_data["radInts_max_t_stat"]
+    C1_radInts_max_p_value = C1_data["radInts_max_p_value"]
+    C2_radInts_max_t_stat = C2_data["radInts_max_t_stat"]
+    C2_radInts_max_p_value = C2_data["radInts_max_p_value"]
+    
+    # -------------------------------------------------------------------------
+    
+    # Plot 1
+    ax1.set_title("C1 norm. fluo. int.")
+    y_cond1 = C1_data["radInts_cond1_avg"]
+    err_cond1 = C1_data["radInts_cond1_std"]
+    x_cond1 = np.arange(len(y_cond1))
+    y_cond2 = C1_data["radInts_cond2_avg"]
+    err_cond2 = C1_data["radInts_cond2_std"]
+    x_cond2 = np.arange(len(y_cond2))
+    ax1.plot(x_cond1, y_cond1, color=C1_color_cond1, label="control")
+    ax1.plot(x_cond2, y_cond2, color=C1_color_cond2, label="PAD")
+    ax1.fill_between(
+        x_cond1, y_cond1 - err_cond1, y_cond1 + err_cond1,
+        alpha=0.05, color=C1_color_cond1)
+    ax1.fill_between(
+        x_cond2, y_cond2 - err_cond2, y_cond2 + err_cond2,
+        alpha=0.05, color=C1_color_cond2)
+    ax1.set_xlim(0, 50)
+    ax1.set_ylabel("norm. fluo. int.")
+    ax1.set_xlabel("Distance (pixels)")
+    ax1.legend(loc="lower left")
+    
+    # Plot 2
+    ax2.set_title(
+        f"C1 dist. of max. fluo. int.\n"
+        f"p value = {C1_radInts_max_p_value:.2e}"
+        )
+    ax2.boxplot(C1_data["radInts_max_cond1"], positions=[1], 
+        widths=0.6, showfliers=False)
+    ax2.boxplot(C1_data["radInts_max_cond2"], positions=[2], 
+        widths=0.6, showfliers=False)
+    ax2.set_xticks([1, 2], ["control", "PAD"])
+    ax2.set_ylabel("Distance (pixels)")
+    
+    # Plot 3
+    ax3.set_title("Control avg. img.")
+    ax3.imshow(C1_data["crops_cond1_avg"], cmap="Greens")
+    ax3.set_ylabel("y")
+    ax3.set_xlabel("x")
+    
+    # Plot 4
+    ax4.set_title("PAD avg. img.")
+    ax4.imshow(C1_data["crops_cond2_avg"], cmap="Greens")
+    ax4.set_ylabel("y")
+    ax4.set_xlabel("x")
+    
+    # -------------------------------------------------------------------------
+    
+    # Plot 5
+    ax5.set_title("C2 norm. fluo. int.")
+    y_cond1 = C2_data["radInts_cond1_avg"]
+    err_cond1 = C2_data["radInts_cond1_std"]
+    x_cond1 = np.arange(len(y_cond1))
+    y_cond2 = C2_data["radInts_cond2_avg"]
+    err_cond2 = C2_data["radInts_cond2_std"]
+    x_cond2 = np.arange(len(y_cond2))
+    ax5.plot(x_cond1, y_cond1, color=C2_color_cond1, label="control")
+    ax5.plot(x_cond2, y_cond2, color=C2_color_cond2, label="PAD")
+    ax5.fill_between(
+        x_cond1, y_cond1 - err_cond1, y_cond1 + err_cond1,
+        alpha=0.05, color=C2_color_cond1)
+    ax5.fill_between(
+        x_cond2, y_cond2 - err_cond2, y_cond2 + err_cond2,
+        alpha=0.05, color=C2_color_cond2)
+    ax5.set_xlim(0, 50)
+    ax5.set_ylabel("Norm. radial fluo. int.")
+    ax5.set_xlabel("Distance (pixels)")
+    ax5.legend(loc="lower left")
+    
+    # Plot 6
+    ax6.set_title(
+        f"C2 dist. of max. fluo. int.\n"
+        f"p value = {C2_radInts_max_p_value:.2e}"
+        )
+    ax6.boxplot(C2_data["radInts_max_cond1"], positions=[1], 
+        widths=0.6, showfliers=False)
+    ax6.boxplot(C2_data["radInts_max_cond2"], positions=[2], 
+        widths=0.6, showfliers=False)
+    ax6.set_xticks([1, 2], ["control", "PAD"])
+    ax6.set_ylabel("Distance (pixels)")
+    
+    # Plot 7
+    ax7.set_title("Control avg. img.")
+    ax7.imshow(C2_data["crops_cond1_avg"], cmap="Purples")
+    ax7.set_ylabel("y")
+    ax7.set_xlabel("x")
+    
+    # Plot 8
+    ax8.set_title("PAD avg. img.")
+    ax8.imshow(C2_data["crops_cond2_avg"], cmap="Purples")
+    ax8.set_ylabel("y")
+    ax8.set_xlabel("x")
+    
+    plt.tight_layout()
+    plt.savefig(Path(data_path, "plot.png"), dpi=300, bbox_inches='tight')
+    plt.show()
