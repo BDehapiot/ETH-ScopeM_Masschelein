@@ -18,7 +18,7 @@ from scipy.ndimage import distance_transform_edt
 #%% Inputs --------------------------------------------------------------------
 
 # Paths
-data_path = Path('D:/local_Masschelein/data/0-archive')
+data_path = Path('D:/local_Masschelein/data')
 
 # Parameters
 crop_size = 120
