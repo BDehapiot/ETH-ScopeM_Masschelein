@@ -10,7 +10,6 @@ Muscular blood vessel analysis tool
 - [Installation](#installation)
 - [Usage](#usage)
 - [Comments](#comments)
-- [Comments](#comments)
 
 ## Installation
 
@@ -127,9 +126,9 @@ cropped images `..._crops_..._avg.tif`, averaged radial fluo. int. profiles
 - C2_radInts_max.csv     # dist. of max. radial fluo. int. C2 - cond1 & cond2 + stats
 ```
 
-## Comments 
+## Comments
 ### Meeting 16/12/2024
 - Export and display values per patient (also for statistics).
 - Thickness as width at half prominence.
 
-## Comments
+13/01/2025 : All done, when validated update README.md
