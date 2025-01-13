@@ -15,7 +15,6 @@ from functions import open_czi
 # Scipy
 from scipy import stats
 from scipy.ndimage import distance_transform_edt
-from scipy.signal import find_peaks, peak_prominences, peak_widths
 
 #%% Inputs --------------------------------------------------------------------
 
@@ -27,7 +26,7 @@ crop_size = 120
 ctr = [1, 3, 4, 5, 6, 7, 9, 11]
 pad = [2, 8, 10, 12, 13, 14, 17, 18, 19]
 
-#%% Function(s) ---------------------------------------------------------------
+#%% Function : analyse() ------------------------------------------------------
 
 def analyse(paths, imgs, coords, crop_size, cond0=ctr, cond1=pad):
     
@@ -125,6 +124,14 @@ def analyse(paths, imgs, coords, crop_size, cond0=ctr, cond1=pad):
     c1p_widths, c1pAvg_widths, c1pStd_widths = average_cpData(
         pAvg_widths, p_conditions, cond=1)
     
+    # Statistics
+    cp_dmaxs_stat, cp_dmaxs_pval = stats.ttest_ind(
+        c0p_dmaxs, c1p_dmaxs, equal_var=True)
+    cp_proms_stat, cp_proms_pval = stats.ttest_ind(
+        c0p_proms, c1p_proms, equal_var=True)
+    cp_widths_stat, cp_widths_pval = stats.ttest_ind(
+        c0p_widths, c1p_widths, equal_var=True)
+    
     # Append
     data = {
         
@@ -155,63 +162,237 @@ def analyse(paths, imgs, coords, crop_size, cond0=ctr, cond1=pad):
         "c1p_proms"   : c1p_proms,   "c1pAvg_proms"   : c1pAvg_proms,   "c1pStd_proms"   : c1pStd_proms,
         "c1p_widths"  : c1p_widths,  "c1pAvg_widths"  : c1pAvg_widths,  "c1pStd_widths"  : c1pStd_widths,
         
+        "cp_dmaxs_stat" : cp_dmaxs_stat, "cp_dmaxs_pval" : cp_dmaxs_pval,
+        "cp_proms_stat" : cp_proms_stat, "cp_proms_pval" : cp_proms_pval,
+        "cp_widths_stat" : cp_widths_stat, "cp_widths_pval" : cp_widths_pval,
+        
         }
     
     return data
 
+#%% Function : save() ---------------------------------------------------------
+
 def save(data, data_path):
-    
+
+    # Paths & create saving folder
     save_path = data_path / "results"
-    
     if save_path.exists():
         shutil.rmtree(save_path)
     save_path.mkdir(exist_ok=True)
     
-    pAvg_radInts = np.vstack((data["pAvg_crops"])).T
-                              
-    pass
-
-# def save(data, data_path, tag="C1"):
-
-#     global radInts, dmax, dmax_cond1, dmax_cond2, tmp_nan
-
-#     # (.tif) Image 
-#     io.imsave(
-#         Path(data_path, f"{tag}_crops_cond1_avg.tif"),
-#         data["crops_cond1_avg"].astype("float32"), check_contrast=False,
-#         )
-#     io.imsave(
-#         Path(data_path, f"{tag}_crops_cond2_avg.tif"),
-#         data["crops_cond2_avg"].astype("float32"), check_contrast=False,
-#         )
+    # -------------------------------------------------------------------------
     
-#     # (.csv) radInts 
-#     radInts = np.vstack((
-#         data["radInts_cond1_avg"], data["radInts_cond1_std"],
-#         data["radInts_cond2_avg"], data["radInts_cond2_std"],
-#         )).T
-#     radInts = pd.DataFrame(radInts, columns=[
-#         "avg. cond1", "std. cond1", "avg. cond2", "std. cond2"])
-#     radInts.to_csv(
-#         Path(data_path, f"{tag}_radInts.csv"), 
-#         index=False, float_format="%.3f"
-#         )
+    # (.tif) Image 
+    io.imsave(
+        Path(save_path, "c0pAvg_crops.tif"),
+        data["c0pAvg_crops"].astype("float32"), check_contrast=False,
+        )
+    io.imsave(
+        Path(save_path, "c1pAvg_crops.tif"),
+        data["c1pAvg_crops"].astype("float32"), check_contrast=False,
+        )
     
-#     # (.csv) dmax 
-#     dmax_cond1 = np.stack(data["dmax_cond1"]).astype(float)
-#     dmax_cond2 = np.stack(data["dmax_cond2"]).astype(float)
-#     max_len = np.maximum(len(dmax_cond1), len(dmax_cond2))
-#     dmax = np.full((max_len, 4), np.nan)
-#     dmax[:len(dmax_cond1), 0] = dmax_cond1
-#     dmax[:len(dmax_cond2), 1] = dmax_cond2
-#     dmax[0, 2] = data["dmax_t_stat"]
-#     dmax[0, 3] = data["dmax_p_value"]
-#     dmax = pd.DataFrame(dmax, columns=[
-#         "cond1", "cond2", "t_stat", "p_value"])
-#     dmax.to_csv(
-#         Path(data_path, f"{tag}_dmax.csv"), 
-#         index=False, float_format="%.5f"
-#         )
+    # -------------------------------------------------------------------------
+    
+    # Patient results radInts
+    avg = np.stack(data["pAvg_radInts"]).T
+    std = np.stack(data["pStd_radInts"]).T
+    pResults_radInts = np.empty((avg.shape[0], avg.shape[1] * 2), dtype=avg.dtype)
+    pResults_radInts[:,  ::2] = avg
+    pResults_radInts[:, 1::2] = std
+
+    columns = []
+    for i in range(avg.shape[1]):
+        columns.append(f"p{data['p_patients'][i]:02d} avg.")
+        columns.append(f"p{data['p_patients'][i]:02d} std.")
+        
+    pResults_radInts = pd.DataFrame(pResults_radInts, columns=columns)
+    
+    pResults_radInts.to_csv(
+        Path(save_path, "pResults_radInts.csv"), 
+        index=False, float_format="%.5f"
+        )
+
+    # -------------------------------------------------------------------------
+
+    # Patient results peaks
+    pResults_peaks = np.array([
+        data["pAvg_dmaxs"], data["pStd_dmaxs"],
+        data["pAvg_proms"], data["pStd_proms"],
+        data["pAvg_widths"], data["pStd_widths"],
+        ]).T
+
+    columns = [
+        "dmaxs avg.", "dmaxs std",
+        "proms avg.", "proms std",
+        "widths avg.", "widths std",
+        ]
+
+    pResults_peaks = pd.DataFrame(pResults_peaks, columns=columns)
+    pResults_peaks.index = data["p_patients"]
+    pResults_peaks.index.name = "patient"
+
+    pResults_peaks.to_csv(
+        Path(save_path, "pResults_peaks.csv"), 
+        index=True, float_format="%.5f"
+        )
+
+    # -------------------------------------------------------------------------
+
+    # Condition results radInts
+    cpResults_radInts = np.array([
+        data["c0pAvg_radInts"], data["c0pStd_radInts"],
+        data["c1pAvg_radInts"], data["c1pStd_radInts"],
+        ]).T
+
+    columns = ["c0 avg.", "c0 std.", "c1 avg.", "c1 std."]
+
+    cpResults_radInts = pd.DataFrame(cpResults_radInts, columns=columns)
+    cpResults_radInts.index = np.arange(0, len(data["c0pAvg_radInts"]))
+    cpResults_radInts.index.name = "distance"
+    
+    cpResults_radInts.to_csv(
+        Path(save_path, "cpResults_radInts.csv"), 
+        index=True, float_format="%.5f"
+        )
+        
+    # -------------------------------------------------------------------------
+    
+    # Condition results peaks
+    cpResults_peaks = np.array([
+        np.hstack((
+            data["c0pAvg_dmaxs"], data["c0pStd_dmaxs"],
+            data["c1pAvg_dmaxs"], data["c1pStd_dmaxs"],
+            data["cp_dmaxs_stat"], data["cp_dmaxs_pval"],
+            )),
+        np.hstack((
+            data["c0pAvg_proms"], data["c0pStd_proms"],
+            data["c1pAvg_proms"], data["c1pStd_proms"],
+            data["cp_proms_stat"], data["cp_proms_pval"],
+            )),    
+        np.hstack((
+            data["c0pAvg_widths"], data["c0pStd_widths"],
+            data["c1pAvg_widths"], data["c1pStd_widths"],
+            data["cp_widths_stat"], data["cp_widths_pval"],
+            )),
+        ])
+
+    columns = ["c0 avg.", "c0 std.", "c1 avg.", "c1 std.", "diff.", "pval."]
+
+    cpResults_peaks = pd.DataFrame(cpResults_peaks, columns=columns)
+    cpResults_peaks.index = ["dmaxs", "proms", "widths"]
+    cpResults_peaks.index.name = "measure"
+    
+    cpResults_peaks.to_csv(
+        Path(save_path, "cpResults_peaks.csv"), 
+        index=True, float_format="%.5f"
+        )
+    
+#%% Function : plot() ---------------------------------------------------------
+    
+def plot(data, data_path):
+    
+    fig = plt.figure(figsize=(8, 8))
+    
+    gs = fig.add_gridspec(3, 3)
+    ax1 = fig.add_subplot(gs[:2, :2])
+    ax2 = fig.add_subplot(gs[0, 2])
+    ax3 = fig.add_subplot(gs[1, 2])
+    ax4 = fig.add_subplot(gs[2, 0])
+    ax5 = fig.add_subplot(gs[2, 1])
+    ax6 = fig.add_subplot(gs[2, 2])
+    
+    # -------------------------------------------------------------------------
+    
+    # Plot options
+    c0_color = "green"
+    c1_color = "magenta"
+    
+    # -------------------------------------------------------------------------
+    
+    # Plot 1
+    ax1.set_title("norm. radial fluo. int.")
+    
+    c0pAvg = data["c0pAvg_radInts"]
+    c1pAvg = data["c1pAvg_radInts"]
+    c0pStd = data["c0pStd_radInts"]
+    c1pStd = data["c1pStd_radInts"]
+    c0x = np.arange(len(c0pAvg)) 
+    c1x = np.arange(len(c1pAvg)) 
+    ax1.plot(c0pAvg, color=c0_color, linewidth=2, label="control")
+    ax1.plot(c1pAvg, color=c1_color, linewidth=2, label="PAD")
+    ax1.fill_between(
+        c0x, c0pAvg - c0pStd, c0pAvg + c0pStd, color=c0_color, alpha=0.05)
+    ax1.fill_between(
+        c1x, c1pAvg - c1pStd, c1pAvg + c1pStd, color=c1_color, alpha=0.05)
+    ax1.set_xlim(0, 50)
+    ax1.set_ylabel("norm. radial fluo. int.")
+    ax1.set_xlabel("Distance (pixels)")
+    ax1.legend(loc="lower left")
+    
+    # Plot 2
+    ax2.set_title("Control avg. img.")
+    ax2.imshow(data["c0pAvg_crops"], cmap="Greens")
+    ax2.set_ylabel("y")
+    ax2.set_xlabel("x")
+    
+    # Plot 3
+    ax3.set_title("PAD avg. img.")
+    ax3.imshow(data["c1pAvg_crops"], cmap="Purples")
+    ax3.set_ylabel("y")
+    ax3.set_xlabel("x")
+    
+    # Plot 4
+    ax4.set_title(
+        f"Dist. of max. fluo. int.\n"
+        f"p value = {data['cp_dmaxs_pval']:.2e}"
+        )
+    c0p_dmaxs = data["c0p_dmaxs"]
+    c1p_dmaxs = data["c1p_dmaxs"]
+    ax4.boxplot(c0p_dmaxs, positions=[1], widths=0.6, showfliers=False)
+    ax4.boxplot(c1p_dmaxs, positions=[2], widths=0.6, showfliers=False)
+    ax4.scatter(
+        [1] * len(c0p_dmaxs), c0p_dmaxs, color=c0_color, alpha=0.7, label="Control")
+    ax4.scatter(
+        [2] * len(c1p_dmaxs), c1p_dmaxs, color=c1_color, alpha=0.7, label="PAD")
+    ax4.set_xticks([1, 2], ["control", "PAD"])
+    ax4.set_ylabel("Distance (pixels)")
+    
+    # Plot 5
+    ax5.set_title(
+        f"Prom. of max. fluo. int.\n"
+        f"p value = {data['cp_proms_pval']:.2e}"
+        )
+    c0p_proms = data["c0p_proms"]
+    c1p_proms = data["c1p_proms"]
+    ax5.boxplot(c0p_proms, positions=[1], widths=0.6, showfliers=False)
+    ax5.boxplot(c1p_proms, positions=[2], widths=0.6, showfliers=False)
+    ax5.scatter(
+        [1] * len(c0p_proms), c0p_proms, color=c0_color, alpha=0.7, label="Control")
+    ax5.scatter(
+        [2] * len(c1p_proms), c1p_proms, color=c1_color, alpha=0.7, label="PAD")
+    ax5.set_xticks([1, 2], ["control", "PAD"])
+    ax5.set_ylabel("Prominence (A.U.)")
+    
+    # Plot 6
+    ax6.set_title(
+        f"Half prom. width\n"
+        f"p value = {data['cp_widths_pval']:.2e}"
+        )
+    c0p_widths = data["c0p_widths"]
+    c1p_widths = data["c1p_widths"]
+    ax6.boxplot(c0p_widths, positions=[1], widths=0.6, showfliers=False)
+    ax6.boxplot(c1p_widths, positions=[2], widths=0.6, showfliers=False)
+    ax6.scatter(
+        [1] * len(c0p_widths), c0p_widths, color=c0_color, alpha=0.7, label="Control")
+    ax6.scatter(
+        [2] * len(c1p_widths), c1p_widths, color=c1_color, alpha=0.7, label="PAD")
+    ax6.set_xticks([1, 2], ["control", "PAD"])
+    ax6.set_ylabel("Width (pixels)")
+    
+    plt.tight_layout()
+    plt.savefig(Path(data_path, "results", "plot.png"), dpi=300, bbox_inches='tight')
+    plt.show()
     
 #%% Execute -------------------------------------------------------------------
 
@@ -230,131 +411,11 @@ if __name__ == "__main__":
     # Analyse
     data = analyse(paths, imgs, coords, crop_size, cond0=ctr, cond1=pad)
     
+    # Save
+    save(data, data_path)
+    
+    # Plot
+    plot(data, data_path)
+    
     t1 = time.time()
     print(f"runtime = {t1 - t0:.5f}")
-
-#%% 
-
-# Patient results radInts
-avg = np.stack(data["pAvg_radInts"]).T
-std = np.stack(data["pStd_radInts"]).T
-pResults_radInts = np.empty((avg.shape[0], avg.shape[1] * 2), dtype=avg.dtype)
-pResults_radInts[:,  ::2] = avg
-pResults_radInts[:, 1::2] = std
-
-# Patient results dmax
-pResults_dmax = np.array([
-    data["p_conditions"], data["p_patients"],
-    data["pAvg_dmaxs"], data["pStd_dmaxs"],
-    ]).T
-
-# Condition results radInts
-cpResults_radInts = np.array([
-    data["c0pAvg_radInts"], data["c0pStd_radInts"],
-    data["c1pAvg_radInts"], data["c1pStd_radInts"],
-    ]).T
-
-#%% Plot ----------------------------------------------------------------------
-
-fig = plt.figure(figsize=(8, 8))
-
-gs = fig.add_gridspec(2, 3)
-ax1 = fig.add_subplot(gs[:2, :2])
-ax2 = fig.add_subplot(gs[1, 0])
-ax3 = fig.add_subplot(gs[2, 1])
-ax4 = fig.add_subplot(gs[2, 2])
-# ax5 = fig.add_subplot(gs[2:, 0])
-# ax6 = fig.add_subplot(gs[2:, 1])
-# ax7 = fig.add_subplot(gs[2, 2])
-# ax8 = fig.add_subplot(gs[3, 2])
-
-# -----------------------------------------------------------------------------
-
-# Plot options
-c0_color = "green"
-c1_color = "magenta"
-
-# -----------------------------------------------------------------------------
-
-# Plot 1
-ax1.set_title("norm. radial fluo. int.")
-
-c0pAvg = data["c0pAvg_radInts"]
-c1pAvg = data["c1pAvg_radInts"]
-c0pStd = data["c0pStd_radInts"]
-c1pStd = data["c1pStd_radInts"]
-c0x = np.arange(len(c0pAvg)) 
-c1x = np.arange(len(c1pAvg)) 
-ax1.plot(c0pAvg, color=c0_color, linewidth=2, label="control")
-ax1.plot(c1pAvg, color=c1_color, linewidth=2, label="PAD")
-ax1.fill_between(
-    c0x, c0pAvg - c0pStd, c0pAvg + c0pStd, color=c0_color, alpha=0.05)
-ax1.fill_between(
-    c1x, c1pAvg - c1pStd, c1pAvg + c1pStd, color=c1_color, alpha=0.05)
-ax1.set_xlim(0, 50)
-ax1.set_ylabel("norm. radial fluo. int.")
-ax1.set_xlabel("Distance (pixels)")
-ax1.legend(loc="lower left")
-
-# Plot 2
-ax3.set_title("Control avg. img.")
-ax3.imshow(C1_data["crops_cond1_avg"], cmap="Greens")
-ax3.set_ylabel("y")
-ax3.set_xlabel("x")
-
-# Plot 3
-ax4.set_title("PAD avg. img.")
-ax4.imshow(C1_data["crops_cond2_avg"], cmap="Greens")
-ax4.set_ylabel("y")
-ax4.set_xlabel("x")
-
-# Plot 2
-ax2.set_title(
-    f"Dist. of max. fluo. int.\n"
-    # f"p value = {C1_dmax_p_value:.2e}"
-    )
-c0p_dmaxs = data["c0p_dmaxs"]
-c1p_dmaxs = data["c1p_dmaxs"]
-ax2.boxplot(c0p_dmaxs, positions=[1], widths=0.6, showfliers=False)
-ax2.boxplot(c1p_dmaxs, positions=[2], widths=0.6, showfliers=False)
-ax2.scatter(
-    [1] * len(c0p_dmaxs), c0p_dmaxs, color=c0_color, alpha=0.7, label="Control")
-ax2.scatter(
-    [2] * len(c1p_dmaxs), c1p_dmaxs, color=c1_color, alpha=0.7, label="PAD")
-ax2.set_xticks([1, 2], ["control", "PAD"])
-ax2.set_ylabel("Distance (pixels)")
-
-# Plot 3
-ax3.set_title(
-    f"Prom. of max. fluo. int.\n"
-    # f"p value = {C1_dmax_p_value:.2e}"
-    )
-c0p_proms = data["c0p_proms"]
-c1p_proms = data["c1p_proms"]
-ax3.boxplot(c0p_proms, positions=[1], widths=0.6, showfliers=False)
-ax3.boxplot(c1p_proms, positions=[2], widths=0.6, showfliers=False)
-ax3.scatter(
-    [1] * len(c0p_proms), c0p_proms, color=c0_color, alpha=0.7, label="Control")
-ax3.scatter(
-    [2] * len(c1p_proms), c1p_proms, color=c1_color, alpha=0.7, label="PAD")
-ax3.set_xticks([1, 2], ["control", "PAD"])
-ax3.set_ylabel("Prominence (A.U.)")
-
-# Plot 4
-ax4.set_title(
-    f"Width of max. fluo. int.\n"
-    # f"p value = {C1_dmax_p_value:.2e}"
-    )
-c0p_widths = data["c0p_widths"]
-c1p_widths = data["c1p_widths"]
-ax4.boxplot(c0p_widths, positions=[1], widths=0.6, showfliers=False)
-ax4.boxplot(c1p_widths, positions=[2], widths=0.6, showfliers=False)
-ax4.scatter(
-    [1] * len(c0p_widths), c0p_widths, color=c0_color, alpha=0.7, label="Control")
-ax4.scatter(
-    [2] * len(c1p_widths), c1p_widths, color=c1_color, alpha=0.7, label="PAD")
-ax4.set_xticks([1, 2], ["control", "PAD"])
-ax4.set_ylabel("Width (pixels)")
-
-plt.tight_layout()
-plt.show()
